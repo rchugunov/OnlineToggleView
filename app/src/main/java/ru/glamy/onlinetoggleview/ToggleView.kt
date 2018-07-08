@@ -20,11 +20,11 @@ class ToggleView : FrameLayout {
     private var moveStartedPosition: Float = 0f
     private var scrollStartedPosition = 0f
     private var scrollCurrentPosition = 0f
-    var friction = 1f
-    private var circleX = 0f
+    private var friction = 1f
     private var xVelocity = 0f
     private var velocityTracker: VelocityTracker? = null
     private var xFling: SpringAnimation? = null
+    private var clipBoundsOffset: Int = 0
 
     constructor(context: Context) : super(context) {
 
@@ -46,6 +46,7 @@ class ToggleView : FrameLayout {
         bnd.rightPart.layoutParams.width = screenWidth()
         viewConfiguration = ViewConfiguration.get(context)
         addView(bnd.root)
+        clipBoundsOffset = (20 * resources.displayMetrics.density).toInt()
 
         initialOffsets()
     }
@@ -77,6 +78,11 @@ class ToggleView : FrameLayout {
                 moveStartedPosition = ev.x
             }
             MotionEvent.ACTION_MOVE -> {
+
+                if (!isWithinBounds(bnd.leftPart, ev) && !isWithinBounds(bnd.rightPart, ev)) {
+                    return false
+                }
+
                 if (mIsScrolling) {
                     // We're currently scrolling, so yes, intercept the
                     // touch event!
@@ -104,8 +110,13 @@ class ToggleView : FrameLayout {
         return false
     }
 
-    override fun onTouchEvent(event: MotionEvent?): Boolean {
-        when (event?.action) {
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+
+        if (!isWithinBounds(bnd.leftPart, event) && !isWithinBounds(bnd.rightPart, event)) {
+            return false
+        }
+
+        when (event.action) {
             MotionEvent.ACTION_DOWN -> {
                 stopFlingAnimations()
                 if (velocityTracker == null) {
@@ -117,7 +128,6 @@ class ToggleView : FrameLayout {
 
                 scrollStartedPosition = event.x
                 scrollCurrentPosition = event.x
-                return true
             }
             MotionEvent.ACTION_MOVE -> {
 
@@ -134,7 +144,6 @@ class ToggleView : FrameLayout {
                 moveView(bnd.leftPart, validDelta)
                 moveView(bnd.rightPart, validDelta)
                 scrollCurrentPosition = event.x
-                return true
             }
             MotionEvent.ACTION_UP -> {
                 velocityTracker?.recycle()
@@ -178,6 +187,18 @@ class ToggleView : FrameLayout {
                     })
                     start()
                 }
+    }
+
+    private fun isWithinBounds(view: View, ev: MotionEvent): Boolean {
+        val xPoint = Math.round(ev.rawX)
+        val yPoint = Math.round(ev.rawY)
+        val l = IntArray(2)
+        view.getLocationOnScreen(l)
+        val x = l[0] - clipBoundsOffset
+        val y = l[1] - clipBoundsOffset
+        val w = view.width + clipBoundsOffset * 2
+        val h = view.height + clipBoundsOffset * 2
+        return !(xPoint < x || xPoint > x + w || yPoint < y || yPoint > y + h)
     }
 
     private fun calculateSpringFinalPosition(springToLeft: Boolean): Float {
