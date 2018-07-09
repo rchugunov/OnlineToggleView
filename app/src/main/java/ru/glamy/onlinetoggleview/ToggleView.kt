@@ -18,7 +18,6 @@ class ToggleView : FrameLayout {
     private val rightLimit: Int = screenWidth()
     private var mIsScrolling: Boolean = false
     private var moveStartedPosition: Float = 0f
-    private var scrollStartedPosition = 0f
     private var scrollCurrentPosition = 0f
     private var friction = 1f
     private var xVelocity = 0f
@@ -125,8 +124,6 @@ class ToggleView : FrameLayout {
                     velocityTracker?.clear()
                 }
                 velocityTracker?.addMovement(event)
-
-                scrollStartedPosition = event.x
                 scrollCurrentPosition = event.x
             }
             MotionEvent.ACTION_MOVE -> {
