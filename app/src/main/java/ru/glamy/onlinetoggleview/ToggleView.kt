@@ -8,13 +8,14 @@ import android.support.animation.SpringForce
 import android.util.AttributeSet
 import android.util.Log
 import android.view.*
-import android.widget.FrameLayout
-import ru.glamy.onlinetoggleview.databinding.ViewToggleBinding
 
-class ToggleView : FrameLayout {
 
-    private lateinit var bnd: ViewToggleBinding
+class ToggleView : ViewGroup {
+
     private lateinit var viewConfiguration: ViewConfiguration
+
+    private var leftViewId: Int = 0
+    private var rightViewId: Int = 0
     private val leftLimit: Int = 0
     private val rightLimit: Int = screenWidth()
     private var isScrolling: Boolean = false
@@ -26,6 +27,22 @@ class ToggleView : FrameLayout {
     private var xFling: SpringAnimation? = null
     private var clipBoundsOffset: Int = 0
 
+
+    private val leftView: View
+        get() {
+            return if (leftViewId == 0) {
+                getChildAt(0)
+            } else findViewById(leftViewId)
+        }
+    private val rightView: View
+        get() {
+            return if (rightViewId == 0) {
+                getChildAt(1)
+            } else {
+                findViewById(rightViewId)
+            }
+        }
+
     constructor(context: Context) : super(context) {
 
         init()
@@ -33,34 +50,38 @@ class ToggleView : FrameLayout {
 
     constructor(context: Context, attrs: AttributeSet?) : super(context, attrs) {
 
-        init()
+        init(attrs)
     }
 
     constructor(context: Context, attrs: AttributeSet?, defStyleAttr: Int) : super(context, attrs, defStyleAttr) {
 
-        init()
+        init(attrs)
     }
 
-    private fun init() {
-        bnd = ViewToggleBinding.inflate(layoutInflater(), this, false)
-        bnd.rightPart.layoutParams.width = screenWidth()
+    private fun init(attrs: AttributeSet? = null) {
+        if (attrs != null) {
+            initLeftRightViews(attrs)
+        }
+
         viewConfiguration = ViewConfiguration.get(context)
-        addView(bnd.root)
         clipBoundsOffset = (20 * resources.displayMetrics.density).toInt()
-
-        initialOffsets()
     }
 
-    private fun initialOffsets() {
-        moveView(bnd.leftPart, (screenWidth() - bnd.leftPart.layoutParams.width).toFloat())
-        moveView(bnd.rightPart, screenWidth().toFloat())
-    }
+    private fun initLeftRightViews(attrs: AttributeSet) {
+        val a = context.theme.obtainStyledAttributes(
+                attrs,
+                R.styleable.ToggleView,
+                0, 0)
 
-    private fun calculateDistanceX(ev: MotionEvent): Int = ev.x.toInt() - moveStartedPosition.toInt()
+        try {
+            leftViewId = a.getResourceId(R.styleable.ToggleView_leftView, 0)
+            rightViewId = a.getResourceId(R.styleable.ToggleView_rightView, 0)
+        } finally {
+            a.recycle()
+        }
+    }
 
     private fun screenWidth(): Int = resources.displayMetrics.widthPixels
-
-    private fun layoutInflater(): LayoutInflater = LayoutInflater.from(context)
 
     override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
 
@@ -91,7 +112,7 @@ class ToggleView : FrameLayout {
         Log.d(ToggleView::class.java.simpleName + " onTouchEvent",
                 "isScrolling $isScrolling, action ${MotionEvent.actionToString(event.action)}")
 
-        if (!isScrolling && !isWithinBounds(bnd.leftPart, event) && !isWithinBounds(bnd.rightPart, event)) {
+        if (!isScrolling && !isWithinBounds(leftView, event) && !isWithinBounds(rightView, event)) {
             return false
         }
 
@@ -140,15 +161,15 @@ class ToggleView : FrameLayout {
 
     private fun handleOnMoveEvent(event: MotionEvent) {
         val delta = event.x - scrollCurrentPosition
-        val validDelta = calculateValidDelta(bnd.rightPart.left.toFloat(), delta)
-        moveView(bnd.leftPart, validDelta)
-        moveView(bnd.rightPart, validDelta)
+        val validDelta = calculateValidDelta(rightView.left.toFloat(), delta)
+        moveView(leftView, validDelta)
+        moveView(rightView, validDelta)
         scrollCurrentPosition = event.x
     }
 
     private fun startXFlingAnimation(springToLeft: Boolean) {
         val springFinalPosition = calculateSpringFinalPosition(springToLeft)
-        xFling = SpringAnimation(FloatValueHolder(bnd.rightPart.left.toFloat()))
+        xFling = SpringAnimation(FloatValueHolder(rightView.left.toFloat()))
                 .setMinimumVisibleChange(MIN_VISIBLE_CHANGE_PIXELS)
                 .setSpring(SpringForce(springFinalPosition)
                         .apply {
@@ -157,8 +178,8 @@ class ToggleView : FrameLayout {
                         })
                 .apply {
                     addUpdateListener({ _, newX, _ ->
-                        moveView(bnd.leftPart, newX - bnd.rightPart.left)
-                        moveView(bnd.rightPart, newX - bnd.rightPart.left)
+                        moveView(leftView, newX - rightView.left)
+                        moveView(rightView, newX - rightView.left)
                     })
                     addEndListener({ _, canceled, _, velocity ->
                         if (!canceled && Math.abs(velocity) > 0) {
@@ -206,9 +227,52 @@ class ToggleView : FrameLayout {
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
-        super.onLayout(changed, left, top, right, bottom)
 
-        initialOffsets()
+        leftView.layout(
+                screenWidth() - leftView.measuredWidth,
+                (bottom - top - leftView.measuredHeight) / 2,
+                screenWidth(),
+                (bottom - top - leftView.measuredHeight) / 2 + leftView.measuredHeight)
+
+        rightView.layout(
+                screenWidth(),
+                (bottom - top - rightView.measuredHeight) / 2,
+                screenWidth() + rightView.measuredWidth,
+                (bottom - top - rightView.measuredHeight) / 2 + rightView.measuredHeight
+        )
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+
+        val lpLeft = leftView.layoutParams
+        val lpRight = rightView.layoutParams
+
+        leftView.measure(
+                MeasureSpec.makeMeasureSpec(getSpecSizeForView(lpLeft.width), getMeasureSpecModeForView(lpLeft.width)),
+                MeasureSpec.makeMeasureSpec(getSpecSizeForView(lpLeft.height), getMeasureSpecModeForView(lpLeft.height)))
+
+        rightView.measure(
+                MeasureSpec.makeMeasureSpec(getSpecSizeForView(lpRight.width), getMeasureSpecModeForView(lpRight.width)),
+                MeasureSpec.makeMeasureSpec(getSpecSizeForView(lpRight.height), getMeasureSpecModeForView(lpRight.height)))
+
+        setMeasuredDimension(leftView.measuredWidth + rightView.measuredWidth,
+                Math.max(leftView.measuredHeight, rightView.measuredHeight))
+    }
+
+    private fun getMeasureSpecModeForView(size: Int): Int {
+        return when (size) {
+            LayoutParams.WRAP_CONTENT -> MeasureSpec.UNSPECIFIED
+            LayoutParams.MATCH_PARENT -> MeasureSpec.EXACTLY
+            else -> MeasureSpec.EXACTLY
+        }
+    }
+
+    private fun getSpecSizeForView(size: Int): Int {
+        return when {
+            (size > 0) -> size
+            size == LayoutParams.MATCH_PARENT -> screenWidth()
+            else -> 0
+        }
     }
 
     private fun moveView(view: View, delta: Float) {
