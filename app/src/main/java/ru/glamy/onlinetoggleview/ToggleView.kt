@@ -6,6 +6,7 @@ import android.support.animation.FloatValueHolder
 import android.support.animation.SpringAnimation
 import android.support.animation.SpringForce
 import android.util.AttributeSet
+import android.util.Log
 import android.view.*
 import android.widget.FrameLayout
 import ru.glamy.onlinetoggleview.databinding.ViewToggleBinding
@@ -16,7 +17,7 @@ class ToggleView : FrameLayout {
     private lateinit var viewConfiguration: ViewConfiguration
     private val leftLimit: Int = 0
     private val rightLimit: Int = screenWidth()
-    private var mIsScrolling: Boolean = false
+    private var isScrolling: Boolean = false
     private var moveStartedPosition: Float = 0f
     private var scrollCurrentPosition = 0f
     private var friction = 1f
@@ -63,44 +64,21 @@ class ToggleView : FrameLayout {
 
     override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
 
-        val action = ev?.action
+        val action = ev?.action ?: throw NullPointerException()
+
+        Log.d(ToggleView::class.java.simpleName + " onInterceptTouchEvent",
+                "isScrolling $isScrolling, action ${MotionEvent.actionToString(action)}")
 
         // Always handle the case of the touch gesture being complete.
         if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP) {
             // Release the scroll.
-            mIsScrolling = false
+            isScrolling = false
             return false // Do not intercept touch event, let the child handle it
         }
 
         when (action) {
             MotionEvent.ACTION_DOWN -> {
                 moveStartedPosition = ev.x
-            }
-            MotionEvent.ACTION_MOVE -> {
-
-                if (!isWithinBounds(bnd.leftPart, ev) && !isWithinBounds(bnd.rightPart, ev)) {
-                    return false
-                }
-
-                if (mIsScrolling) {
-                    // We're currently scrolling, so yes, intercept the
-                    // touch event!
-                    return true
-                }
-
-                // If the user has dragged her finger horizontally more than
-                // the touch slop, start the scroll
-
-                // left as an exercise for the reader
-                val xDiff = calculateDistanceX(ev)
-
-                // Touch slop should be calculated using ViewConfiguration
-                // constants.
-                if (xDiff > viewConfiguration.scaledTouchSlop) {
-                    // Start scrolling!
-                    mIsScrolling = true
-                    return true
-                }
             }
         }
 
@@ -110,8 +88,10 @@ class ToggleView : FrameLayout {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
+        Log.d(ToggleView::class.java.simpleName + " onTouchEvent",
+                "isScrolling $isScrolling, action ${MotionEvent.actionToString(event.action)}")
 
-        if (!isWithinBounds(bnd.leftPart, event) && !isWithinBounds(bnd.rightPart, event)) {
+        if (!isScrolling && !isWithinBounds(bnd.leftPart, event) && !isWithinBounds(bnd.rightPart, event)) {
             return false
         }
 
@@ -135,16 +115,13 @@ class ToggleView : FrameLayout {
                         xVelocity = it.getXVelocity(event.getPointerId(0))
                     }
                 }
-
-                val delta = event.x - scrollCurrentPosition
-                val validDelta = calculateValidDelta(bnd.rightPart.left.toFloat(), delta)
-                moveView(bnd.leftPart, validDelta)
-                moveView(bnd.rightPart, validDelta)
-                scrollCurrentPosition = event.x
+                isScrolling = true
+                handleOnMoveEvent(event)
             }
             MotionEvent.ACTION_UP -> {
                 velocityTracker?.recycle()
                 velocityTracker = null
+                isScrolling = false
                 if (friction < MAX_FRICTION) {
                     startXFlingAnimation(xVelocity < 0)
                 }
@@ -152,25 +129,32 @@ class ToggleView : FrameLayout {
             MotionEvent.ACTION_CANCEL -> {
                 velocityTracker?.recycle()
                 velocityTracker = null
-
+                isScrolling = false
+                if (friction < MAX_FRICTION) {
+                    startXFlingAnimation(xVelocity < 0)
+                }
             }
         }
         return true
     }
 
+    private fun handleOnMoveEvent(event: MotionEvent) {
+        val delta = event.x - scrollCurrentPosition
+        val validDelta = calculateValidDelta(bnd.rightPart.left.toFloat(), delta)
+        moveView(bnd.leftPart, validDelta)
+        moveView(bnd.rightPart, validDelta)
+        scrollCurrentPosition = event.x
+    }
+
     private fun startXFlingAnimation(springToLeft: Boolean) {
         val springFinalPosition = calculateSpringFinalPosition(springToLeft)
         xFling = SpringAnimation(FloatValueHolder(bnd.rightPart.left.toFloat()))
-//                .setStartVelocity(xVelocity)
-//                .setMaxValue(rightLimit.toFloat())
-//                .setMinValue(leftLimit.toFloat())
                 .setMinimumVisibleChange(MIN_VISIBLE_CHANGE_PIXELS)
                 .setSpring(SpringForce(springFinalPosition)
                         .apply {
                             stiffness = SpringForce.STIFFNESS_LOW
                             dampingRatio = SpringForce.DAMPING_RATIO_MEDIUM_BOUNCY
                         })
-//                .setFriction(friction)
                 .apply {
                     addUpdateListener({ _, newX, _ ->
                         moveView(bnd.leftPart, newX - bnd.rightPart.left)
