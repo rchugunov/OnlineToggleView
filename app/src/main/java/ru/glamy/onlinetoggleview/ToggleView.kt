@@ -1,12 +1,11 @@
 package ru.glamy.onlinetoggleview
 
 import android.content.Context
-import android.support.animation.DynamicAnimation.MIN_VISIBLE_CHANGE_PIXELS
+import android.support.animation.DynamicAnimation
 import android.support.animation.FloatValueHolder
 import android.support.animation.SpringAnimation
 import android.support.animation.SpringForce
 import android.util.AttributeSet
-import android.util.Log
 import android.view.*
 
 
@@ -28,13 +27,13 @@ class ToggleView : ViewGroup {
     private var clipBoundsOffset: Int = 0
 
 
-    private val leftView: View
+    val leftView: View
         get() {
             return if (leftViewId == 0) {
                 getChildAt(0)
             } else findViewById(leftViewId)
         }
-    private val rightView: View
+    val rightView: View
         get() {
             return if (rightViewId == 0) {
                 getChildAt(1)
@@ -83,12 +82,11 @@ class ToggleView : ViewGroup {
 
     private fun screenWidth(): Int = resources.displayMetrics.widthPixels
 
-    override fun onInterceptTouchEvent(ev: MotionEvent?): Boolean {
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
 
-        val action = ev?.action ?: throw NullPointerException()
+//        Log.d(this::class.java.simpleName, "onInterceptTouchEvent Action ${MotionEvent.actionToString(ev.action)}")
 
-        Log.d(ToggleView::class.java.simpleName + " onInterceptTouchEvent",
-                "isScrolling $isScrolling, action ${MotionEvent.actionToString(action)}")
+        val action = ev.action
 
         // Always handle the case of the touch gesture being complete.
         if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_UP) {
@@ -99,7 +97,35 @@ class ToggleView : ViewGroup {
 
         when (action) {
             MotionEvent.ACTION_DOWN -> {
+                scrollStarted(ev)
                 moveStartedPosition = ev.x
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+
+                if (!isScrolling && !isWithinBounds(leftView, ev) && !isWithinBounds(rightView, ev)) {
+                    return false
+                }
+
+                if (isScrolling) {
+                    // We're currently scrolling, so yes, intercept the
+                    // touch event!
+                    return true
+                }
+
+                // If the user has dragged her finger horizontally more than
+                // the touch slop, start the scroll
+
+                // left as an exercise for the reader
+                val xDiff = calculateDistanceX(ev)
+
+                // Touch slop should be calculated using ViewConfiguration
+                // constants.
+                if (Math.abs(xDiff) > viewConfiguration.scaledTouchSlop) {
+                    // Start scrolling!
+                    isScrolling = true
+                    return true
+                }
             }
         }
 
@@ -108,9 +134,20 @@ class ToggleView : ViewGroup {
         return false
     }
 
+    private fun scrollStarted(ev: MotionEvent) {
+        stopFlingAnimations()
+        if (velocityTracker == null) {
+            velocityTracker = VelocityTracker.obtain()
+        } else {
+            velocityTracker?.clear()
+        }
+        velocityTracker?.addMovement(ev)
+        scrollCurrentPosition = ev.x
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        Log.d(ToggleView::class.java.simpleName + " onTouchEvent",
-                "isScrolling $isScrolling, action ${MotionEvent.actionToString(event.action)}")
+
+//        Log.d(this::class.java.simpleName, "onTouchEvent Action ${MotionEvent.actionToString(event.action)}")
 
         if (!isScrolling && !isWithinBounds(leftView, event) && !isWithinBounds(rightView, event)) {
             return false
@@ -118,14 +155,7 @@ class ToggleView : ViewGroup {
 
         when (event.action) {
             MotionEvent.ACTION_DOWN -> {
-                stopFlingAnimations()
-                if (velocityTracker == null) {
-                    velocityTracker = VelocityTracker.obtain()
-                } else {
-                    velocityTracker?.clear()
-                }
-                velocityTracker?.addMovement(event)
-                scrollCurrentPosition = event.x
+                scrollStarted(event)
             }
             MotionEvent.ACTION_MOVE -> {
 
@@ -140,23 +170,32 @@ class ToggleView : ViewGroup {
                 handleOnMoveEvent(event)
             }
             MotionEvent.ACTION_UP -> {
-                velocityTracker?.recycle()
-                velocityTracker = null
-                isScrolling = false
-                if (friction < MAX_FRICTION) {
-                    startXFlingAnimation(xVelocity < 0)
+                val wasScrolling = finishScroll()
+                if (wasScrolling) {
+                    isScrolling = false
+                } else {
+                    performClick()
                 }
             }
             MotionEvent.ACTION_CANCEL -> {
-                velocityTracker?.recycle()
-                velocityTracker = null
+                finishScroll()
                 isScrolling = false
-                if (friction < MAX_FRICTION) {
-                    startXFlingAnimation(xVelocity < 0)
-                }
             }
         }
         return true
+    }
+
+    private fun calculateDistanceX(ev: MotionEvent): Int = ev.x.toInt() - moveStartedPosition.toInt()
+
+    private fun finishScroll(): Boolean {
+        velocityTracker?.recycle()
+        velocityTracker = null
+
+        if (isScrolling && friction < MAX_FRICTION) {
+            startXFlingAnimation(xVelocity < 0)
+        }
+
+        return isScrolling
     }
 
     private fun handleOnMoveEvent(event: MotionEvent) {
@@ -167,10 +206,16 @@ class ToggleView : ViewGroup {
         scrollCurrentPosition = event.x
     }
 
+    override fun performClick(): Boolean {
+        super.performClick()
+
+        return true
+    }
+
     private fun startXFlingAnimation(springToLeft: Boolean) {
         val springFinalPosition = calculateSpringFinalPosition(springToLeft)
         xFling = SpringAnimation(FloatValueHolder(rightView.left.toFloat()))
-                .setMinimumVisibleChange(MIN_VISIBLE_CHANGE_PIXELS)
+                .setMinimumVisibleChange(DynamicAnimation.MIN_VISIBLE_CHANGE_PIXELS)
                 .setSpring(SpringForce(springFinalPosition)
                         .apply {
                             stiffness = SpringForce.STIFFNESS_LOW
@@ -227,19 +272,20 @@ class ToggleView : ViewGroup {
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+        if (changed) {
+            leftView.layout(
+                    screenWidth() - leftView.measuredWidth,
+                    (bottom - top - leftView.measuredHeight) / 2,
+                    screenWidth(),
+                    (bottom - top - leftView.measuredHeight) / 2 + leftView.measuredHeight)
 
-        leftView.layout(
-                screenWidth() - leftView.measuredWidth,
-                (bottom - top - leftView.measuredHeight) / 2,
-                screenWidth(),
-                (bottom - top - leftView.measuredHeight) / 2 + leftView.measuredHeight)
-
-        rightView.layout(
-                screenWidth(),
-                (bottom - top - rightView.measuredHeight) / 2,
-                screenWidth() + rightView.measuredWidth,
-                (bottom - top - rightView.measuredHeight) / 2 + rightView.measuredHeight
-        )
+            rightView.layout(
+                    screenWidth(),
+                    (bottom - top - rightView.measuredHeight) / 2,
+                    screenWidth() + rightView.measuredWidth,
+                    (bottom - top - rightView.measuredHeight) / 2 + rightView.measuredHeight
+            )
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -277,6 +323,14 @@ class ToggleView : ViewGroup {
 
     private fun moveView(view: View, delta: Float) {
         view.offsetLeftAndRight(delta.toInt())
+    }
+
+    fun scrollToLeft() {
+        startXFlingAnimation(true)
+    }
+
+    fun scrollToRight() {
+        startXFlingAnimation(false)
     }
 
     companion object {
